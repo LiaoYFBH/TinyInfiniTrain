@@ -22,6 +22,24 @@ void AccumulateGrad(const std::shared_ptr<Tensor> &gradient, float rate, const s
     AccumulateGradKernel<<<num_blocks, threads_per_block>>>(grad_ptr, rate, tensor_ptr, num_elements);
 }
 
+// =================================== 作业 ===================================
+// Helper kernel
+__global__ void AdamKernel(const float *grad, float *param, float *m, float *v, float learning_rate,
+                           float beta1, float beta2, float eps, float beta1_t, float beta2_t, size_t num_elements) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_elements) {
+        float g = grad[idx];
+        float m_val = beta1 * m[idx] + (1.0f - beta1) * g;
+        float v_val = beta2 * v[idx] + (1.0f - beta2) * g * g;
+        m[idx] = m_val;
+        v[idx] = v_val;
+        float m_hat = m_val / (1.0f - beta1_t);
+        float v_hat = v_val / (1.0f - beta2_t);
+        param[idx] -= learning_rate * m_hat / (sqrtf(v_hat) + eps);
+    }
+}
+// =================================== 作业 ===================================
+
 void AdamAccumulateGrad(const std::shared_ptr<Tensor> &grad, const std::shared_ptr<Tensor> &param,
                         const std::shared_ptr<Tensor> &m, const std::shared_ptr<Tensor> &v, float learning_rate,
                         float beta1, float beta2, float eps, int64_t t) {
@@ -29,6 +47,20 @@ void AdamAccumulateGrad(const std::shared_ptr<Tensor> &grad, const std::shared_p
     // TODO：实现Adam优化器的梯度累积和参数更新
     // REF:
     // =================================== 作业 ===================================
+    size_t num_elements = param->NumElements();
+    float* grad_ptr = (float*)grad->DataPtr();
+    float* param_ptr = (float*)param->DataPtr();
+    float* m_ptr = (float*)m->DataPtr();
+    float* v_ptr = (float*)v->DataPtr();
+    
+    int threads_per_block = 256;
+    int num_blocks = (num_elements + threads_per_block - 1) / threads_per_block;
+    
+    float beta1_t = powf(beta1, t);
+    float beta2_t = powf(beta2, t);
+    
+    AdamKernel<<<num_blocks, threads_per_block>>>(grad_ptr, param_ptr, m_ptr, v_ptr,
+                                                  learning_rate, beta1, beta2, eps, beta1_t, beta2_t, num_elements);
 }
 } // namespace infini_train::kernels::cuda
 

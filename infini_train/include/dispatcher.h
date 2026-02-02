@@ -19,9 +19,9 @@ public:
         // TODO：实现通用kernel调用接口
         // 功能描述：将存储的函数指针转换为指定类型并调用
         // =================================== 作业 ===================================
-
         using FuncT = RetT (*)(ArgsT...);
-        // TODO: 实现函数调用逻辑
+        auto func = reinterpret_cast<FuncT>(func_ptr_);
+        return func(std::forward<ArgsT>(args)...);
     }
 
 private:
@@ -48,6 +48,8 @@ public:
         // TODO：实现kernel注册机制
         // 功能描述：将kernel函数与设备类型、名称绑定
         // =================================== 作业 ===================================
+        CHECK(!key_to_kernel_map_.contains(key)) << "Kernel already registered: " << key.second;
+        key_to_kernel_map_.emplace(key, KernelFunction(std::forward<FuncT>(kernel)));
     }
 
 private:
@@ -55,8 +57,12 @@ private:
 };
 } // namespace infini_train
 
+// =================================== 作业 ===================================
+// TODO：实现自动注册宏
+// 功能描述：在全局静态区注册kernel，避免显式初始化代码
+// =================================== 作业 ===================================
 #define REGISTER_KERNEL(device, kernel_name, kernel_func)                                                              \
-    // =================================== 作业 ===================================
-    // TODO：实现自动注册宏
-    // 功能描述：在全局静态区注册kernel，避免显式初始化代码
-    // =================================== 作业 ===================================
+    static const bool _reg_##kernel_name = []() {                                                                      \
+        infini_train::Dispatcher::Instance().Register({device, #kernel_name}, kernel_func);                            \
+        return true;                                                                                                   \
+    }();

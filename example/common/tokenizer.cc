@@ -78,6 +78,28 @@ Tokenizer::Tokenizer(const std::string &filepath) {
     | magic(4B) | version(4B) | vocab_size(4B) | reserved(1012B) | token词表数据       |
     ----------------------------------------------------------------------------------
     ===================================== 作业 ===================================== */
+    std::ifstream file(filepath, std::ios::binary);
+    CHECK(file.is_open()) << "Failed to open " << filepath;
+    auto header = ReadSeveralBytesFromIfstream(1024, &file);
+    magic_number_ = BytesToType<uint32_t>(header, 0);
+    int32_t version = BytesToType<int32_t>(header, 4);
+    int32_t vocab_size = BytesToType<int32_t>(header, 8);
+    
+    if (kEotMap.count(magic_number_)) {
+        eot_token_ = kEotMap.at(magic_number_);
+    } else {
+        LOG(WARNING) << "Unknown magic number: " << magic_number_ << ", using default EOT.";
+        eot_token_ = 0;
+    }
+
+    for (int i = 0; i < vocab_size; ++i) {
+        uint8_t len_byte;
+        file.read(reinterpret_cast<char*>(&len_byte), 1);
+        int len = static_cast<int>(len_byte);
+        std::string token_str(len, '\0');
+        file.read(&token_str[0], len);
+        token_table_.push_back(token_str);
+    }
 }
 
 std::string Tokenizer::Decode(uint32_t token_id) const {
@@ -85,6 +107,7 @@ std::string Tokenizer::Decode(uint32_t token_id) const {
     TODO：实现token_id到文本的转换
     功能描述：根据token_id返回对应的文本片段
     ===================================== 作业 ===================================== */
+    if (token_id < token_table_.size()) return token_table_[token_id];
     return "";
 }
 
@@ -111,6 +134,41 @@ void Tokenizer::GenerateText(infini_train::nn::Module &model, uint32_t batch_siz
         TODO：实现单步文本生成逻辑
         HINT：调用model.Forward推理获取logits，根据推理结果进行随机采样，调用Decode获取文本结果
         ===================================== 作业 ===================================== */
+        
+        // Forward pass
+        auto logits_vec = model.Forward({x}); 
+        auto logits = logits_vec[0]; // (batch, seq_len, vocab)
+        
+        // Extract next token logits (at seq_len t-1)
+        auto next_token_logits = logits->Slice(1, t - 1, t, 1); // (batch, 1, vocab)
+        
+        // Copy to CPU for sampling
+        auto cpu_logits = std::make_shared<infini_train::Tensor>(next_token_logits->To(infini_train::Device(infini_train::DeviceType::kCPU, 0)));
+        float* logits_ptr = static_cast<float*>(cpu_logits->DataPtr());
+        int64_t vocab_size = cpu_logits->Dims().back();
+        
+        // Softmax and Sample
+        std::vector<float> probs(vocab_size);
+        float max_logit = -1e9;
+        for(int i=0; i<vocab_size; ++i) max_logit = std::max(max_logit, logits_ptr[i]);
+        float sum = 0.0f;
+        for(int i=0; i<vocab_size; ++i) {
+            probs[i] = std::exp(logits_ptr[i] - max_logit);
+            sum += probs[i];
+        }
+        for(int i=0; i<vocab_size; ++i) probs[i] /= sum;
+        
+        float coin = RandomF32(kRngState);
+        int token = SampleMult(probs.data(), vocab_size, coin);
+        
+        // Output
+        std::string text = Decode(token);
+        std::cout << text << std::flush;
+        
+        // Update input
+        x_buff[t] = token;
+        auto new_x = x_tensor.To(device);
+        x = std::make_shared<infini_train::Tensor>(new_x);
     }
     std::cout << std::endl;
 }

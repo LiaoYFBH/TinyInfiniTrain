@@ -282,8 +282,30 @@ std::shared_ptr<Tensor> Tensor::Flatten(int64_t start, int64_t end) {
     // TODO：实现张量扁平化操作，将指定维度范围[start, end]内的所有维度合并为一个维度
     // HINT:
     // =================================== 作业 ===================================
-
-    return std::make_shared<Tensor>();
+    int64_t ndim = dims_.size();
+    if (start < 0) start += ndim;
+    if (end < 0) end += ndim;
+    
+    CHECK(start >= 0 && start < ndim) << "Invalid start dim";
+    CHECK(end >= 0 && end < ndim) << "Invalid end dim";
+    CHECK(start <= end) << "start must be <= end";
+    
+    std::vector<int64_t> new_shape;
+    for (int i = 0; i < start; ++i) {
+        new_shape.push_back(dims_[i]);
+    }
+    
+    int64_t flattened_dim = 1;
+    for (int i = start; i <= end; ++i) {
+        flattened_dim *= dims_[i];
+    }
+    new_shape.push_back(flattened_dim);
+    
+    for (int i = end + 1; i < ndim; ++i) {
+        new_shape.push_back(dims_[i]);
+    }
+    
+    return Contiguous()->View(new_shape);
 }
 
 std::shared_ptr<Tensor> Tensor::Squeeze(int64_t dim) {
@@ -358,6 +380,14 @@ void Tensor::Backward(std::shared_ptr<Tensor> gradient, bool retain_graph, bool 
     // TODO：实现自动微分反向传播
     // 功能描述：1. 计算当前张量对叶子节点的梯度    2. 支持多输出场景的梯度累加
     // =================================== 作业 ===================================
+    if (!grad_fn_) return;
+    
+    if (!gradient) {
+        gradient = std::make_shared<Tensor>(dims_, dtype_, GetDevice());
+        gradient->Fill(1.0f);
+    }
+    
+    grad_fn_->BackwardPartial(gradient, output_idx_);
 }
 
 void Tensor::ZeroGrad() {
